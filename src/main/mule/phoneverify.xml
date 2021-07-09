@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:validation="http://www.mulesoft.org/schema/mule/validation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="3844fe30-b018-4d2f-8e5d-11f3b72a0270" basePath="/api" >
+		<http:request-connection host="apilayer.net" port="80" />
+	</http:request-config>
+	<validation:config name="Validation_Config" doc:name="Validation Config" doc:id="267963ee-469a-41f0-9b77-b9c06b4afe5f" />
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="7b98360a-0c0c-4296-9979-880b00dfa2e2" >
+		<db:my-sql-connection host="sql5.freemysqlhosting.net" port="3306" user="sql5423543" password="fNFwxe27vj" database="sql5423543" />
+	</db:config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="567d5070-4ba2-4a5e-a06c-bfefaa7f9744" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<flow name="phoneverifyFlow" doc:id="25edc8af-79ac-4e19-af15-7470eced0448" >
+		<http:listener doc:name="Listener" doc:id="e47c2d48-c34d-4dd7-b71a-04533b389d70" config-ref="HTTP_Listener_config" path="/path" allowedMethods="POST"/>
+		<foreach doc:name="For Each" doc:id="cf19891d-12c3-4c29-aa08-8d80d295a2a0" >
+			<logger level="INFO" doc:name="Logger" doc:id="34f097cb-1d74-4484-92f2-316118dfb9be" message="before flow" />
+			<validation:matches-regex doc:name="Matches regex" doc:id="9d0a8371-606c-42d4-abe6-153531b3e1b3" config-ref="Validation_Config" value="#[payload.phoneNumber]" regex="^[+]*[(]{0,1}[0-9]{1,4}[)]{0,1}[-\s\./0-9]*$" caseSensitive="false" />
+			<http:request method="GET" doc:name="Request" doc:id="b4a337c8-9ade-4551-9ecc-11cecba50e15" config-ref="HTTP_Request_configuration" path="/validate" target="customer">
+			<http:query-params><![CDATA[#[output application/java
+---
+{
+	number : payload.phoneNumber,
+	access_key : "f0477098f6e7130ed898cdeb6054155b"
+}]]]></http:query-params>
+		</http:request>
+			<choice doc:name="Choice" doc:id="2cfcb680-45fc-47cc-b736-d01050a1aa10">
+			<when expression="#[vars.customer.valid==true]">
+				<db:insert doc:name="verified" doc:id="95cb1986-523a-4c33-8ab0-4971e622373e" config-ref="Database_Config">
+					<db:sql><![CDATA[insert into customer(name,email,phone)values(:name,:email,:phoneNumber)]]></db:sql>
+					<db:input-parameters><![CDATA[#[{
+	name:payload.name,
+	email:payload.email,
+	phoneNumber:payload.phoneNumber
+}]]]></db:input-parameters>
+						<db:auto-generated-keys-column-indexes />
+				</db:insert>
+					<ee:transform doc:name="Transform Message" doc:id="3aad5414-1cc4-40aa-a5a3-018be09fefe8">
+						<ee:message>
+						</ee:message>
+						<ee:variables>
+							<ee:set-variable variableName="verified"><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+			</when>
+				<when expression="#[vars.customer.valid==false]">
+					<db:insert doc:name="unverified" doc:id="330e2bfc-f95b-4196-8556-43b4244471e1" config-ref="Database_Config" target="unverified">
+						<db:sql><![CDATA[insert into unverifiedCustomer(name,email,phone)values(:name,:email,:phoneNumber)]]></db:sql>
+						<db:input-parameters><![CDATA[#[{
+	name:payload.name,
+	email:payload.email,
+	phoneNumber:payload.phoneNumber
+}]]]></db:input-parameters>
+					</db:insert>
+					<ee:transform doc:name="Transform Message" doc:id="257dc05e-f173-4cc4-a396-5a648c7be2c8">
+						<ee:message>
+						</ee:message>
+						<ee:variables >
+							<ee:set-variable variableName="unverified" ><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+				</when>
+		</choice>
+		</foreach>
+		<scatter-gather doc:name="Scatter-Gather" doc:id="441fc9d8-3ceb-4167-bb41-08e535be3ed6" >
+			<route >
+				<db:select doc:name="verified" doc:id="3f60fb86-1e5f-446b-a4eb-73ef210b9c24" config-ref="Database_Config">
+					<db:sql><![CDATA[select * from customer]]></db:sql>
+				</db:select>
+				<ee:transform doc:name="Transform Message" doc:id="1baf3ee0-e53a-4104-a197-f7443e8cbb95" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf(payload)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</route>
+			<route >
+				<db:select doc:name="unverifiedCustomer" doc:id="bbd9d838-b222-4891-b085-3d7b343e3f5e" config-ref="Database_Config">
+					<db:sql><![CDATA[select * from unverifiedCustomer]]></db:sql>
+				</db:select>
+				<ee:transform doc:name="Transform Message" doc:id="9ce1e0e5-476a-4e8b-9b5a-c3af0ddef84e" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf(payload)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</route>
+		</scatter-gather>
+		<ee:transform doc:name="Transform Message" doc:id="7a9d6012-02da-48a3-a54f-8cd816868508">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var aggregated_Data=flatten(payload..payload)
+---
+{
+	No_of_verified_customer:aggregated_Data[0],
+	No_of_unverified_customer:aggregated_Data[1]
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="903bb32d-34c4-499f-af28-cbd7ff58b20b" message="After flow"/>
+	</flow>
+</mule>
